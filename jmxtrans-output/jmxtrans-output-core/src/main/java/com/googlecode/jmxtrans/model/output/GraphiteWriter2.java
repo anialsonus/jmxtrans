@@ -57,24 +57,47 @@ public class GraphiteWriter2 implements WriterBasedOutputWriter {
 
 	@Override
 	public void write(
-			@Nonnull Writer writer,
-			@Nonnull Server server,
-			@Nonnull Query query,
-			@Nonnull Iterable<Result> results) throws IOException {
+		@Nonnull Writer writer,
+		@Nonnull Server server,
+		@Nonnull Query query,
+		@Nonnull Iterable<Result> results) throws IOException {
+		boolean requiredToPass = false;
 
 		for (Result result : results) {
 			log.debug("Query result: {}", result);
 			Object value = result.getValue();
-			if (isValidNumber(value)) {
 
+			if (value != null) {
+				log.debug("[FIX] Fetched next raw metric value: '{}' for type: '{}'", value, result.getTypeName());
+
+				try {
+					Double parsedValue = Double.parseDouble(value.toString());
+
+					if (parsedValue.isNaN()) {
+						value = -1;
+						log.debug("[FIX] Given value is NaN, reassigning this value to '{}' for type '{}'", value, result.getTypeName());
+					}
+				} catch (NumberFormatException exception) {
+					requiredToPass = true;
+					log.debug("[FAIL] Can't parse to double. {}", exception.getMessage());
+				}
+			}
+
+			if (isValidNumber(value)) {
 				String line = KeyUtils.getKeyString(server, query, result, typeNames, rootPrefix)
-						.replaceAll("[()]", "_") + " " + value.toString() + " "
-						+ SECONDS.convert(result.getEpoch(), MILLISECONDS) + "\n";
+					.replaceAll("[()]", "_") + " " + value.toString() + " "
+					+ SECONDS.convert(result.getEpoch(), MILLISECONDS) + "\n";
+
 				log.debug("Graphite Message: {}", line);
 				writer.write(line);
 			} else {
-				onlyOnceLogger.infoOnce("Unable to submit non-numeric value to Graphite: [{}] from result [{}]", value, result);
+				if (!requiredToPass)
+					onlyOnceLogger.infoOnce("Unable to submit non-numeric value to Graphite: [{}] from result [{}]", value, result);
 			}
+
+			requiredToPass = false;
 		}
 	}
 }
+
+
